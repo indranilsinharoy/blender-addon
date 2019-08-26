@@ -572,7 +572,14 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
                 depth_small = median_downsampling(depth, LF.depth_map_scale, LF.depth_map_scale)
 
             # create disparity maps
-            disp = (factor / depth - LF.baseline_x_m * LF.focal_length * max_res) / LF.focus_dist / LF.sensor_size
+            if LF.focus_dist == 0:
+                disp = (LF.baseline_x_m / depth) * (LF.focal_length * max_res / LF.sensor_size)
+            else:
+                # insr, but why is disparity shifted (the second part in the below expression) just like a camera shift x_shift, y_shift is applied when LF.focus_dist is not equal to zero?
+                disp = (LF.baseline_x_m / depth) * (LF.focal_length * max_res / LF.sensor_size) - LF.baseline_x_m * LF.focal_length * max_res / LF.focus_dist / LF.sensor_size
+                # the above expression is the same as
+                # disp = (factor / depth - LF.baseline_x_m * LF.focal_length * max_res) / LF.focus_dist / LF.sensor_size
+
             disp_small = median_downsampling(disp, LF.depth_map_scale, LF.depth_map_scale)
 
             # set disparity range for config file
