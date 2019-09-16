@@ -141,14 +141,24 @@ class LFPropertyGroup(bpy.types.PropertyGroup):
         description='Factor for the high resolution depth map export'
     )
     save_depth_for_all_views = BoolProperty(
-        name='save depth and disparity maps for all views',
+        name='save depth maps for all views',
         default=False,
-        description='Whether to save disp/depth maps for all views or only for center view.'
+        description='Whether to save depth maps for all views.'
+    )
+    save_disparity_for_all_views = BoolProperty(
+        name='save disparity maps for all views',
+        default=False,
+        description='Whether to save disparity maps for all views.'
     )
     save_object_id_maps_for_all_views = BoolProperty(
         name='save object id maps for all views',
         default=False,
-        description='Whether to save object id maps for all views or only for center view.'
+        description='Whether to save object-id maps for all views or only for center view.'
+    )
+    save_all_maps_for_center_view = BoolProperty(
+        name='save above maps for center view',
+        default=True,
+        description='Whether to save object id maps for the center view.'
     )
     sequence_start = IntProperty(
         name='start frame',

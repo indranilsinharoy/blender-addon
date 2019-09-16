@@ -397,18 +397,22 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
         bpy.context.scene.render.use_antialiasing = False
 
         # render high resolution object id maps
+        oid_cameras = []
         if LF.save_object_id_maps_for_all_views:
             oid_cameras = lf_cameras
-        else:
+        elif LF.save_all_maps_for_center_view:
             oid_cameras = [LF.get_center_camera()]
-        self.render_object_id_maps(oid_cameras, scene_key, LF, tgt_dir)
+        if (len(oid_cameras)):
+            self.render_object_id_maps(oid_cameras, scene_key, LF, tgt_dir)
 
         # render high resolution depth maps
-        if LF.save_depth_for_all_views:
+        depth_cameras = []
+        if LF.save_depth_for_all_views or LF.save_disparity_for_all_views:
             depth_cameras = lf_cameras
-        else:
+        elif LF.save_all_maps_for_center_view:
             depth_cameras = [LF.get_center_camera()]
-        self.render_depth_and_disp_maps(depth_cameras, scene_key, LF, tgt_dir)
+        if (len(depth_cameras)):
+            self.render_depth_and_disp_maps(depth_cameras, scene_key, LF, tgt_dir)
 
         # save parameters as config file in target directory of rendering
         tmp_config_path = LF.path_config_file
@@ -500,7 +504,7 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
         # save object id map for each camera
         for camera in cameras:
             print("Rendering object id map with camera: " + camera.name)
-            oid_filename = 'objectids_highres_' + self.get_raw_camera_name(camera.name)
+            oid_filename = 'objectids_' + self.get_raw_camera_name(camera.name)
             out_oid.path = oid_filename + "_frame###"
 
             # set scene camera to current light field camera
@@ -509,23 +513,24 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
             # render scene and adjust the file name
             bpy.ops.render.render(write_still=True)
             self.remove_blender_frame_from_file_name(oid_filename, tgt_dir)
+        
+        if LF.save_all_maps_for_center_view:
+            # handle additional "standard" center view object id map
+            center_camera = LF.get_center_camera()
+            src = os.path.join(tgt_dir, 'objectids_%s.png' % self.get_raw_camera_name(center_camera.name))
+            tgt = os.path.join(tgt_dir, 'objectids.png')
 
-        # handle additional "standard" center view object id map
-        center_camera = LF.get_center_camera()
-        src = os.path.join(tgt_dir, 'objectids_highres_%s.png' % self.get_raw_camera_name(center_camera.name))
-        tgt = os.path.join(tgt_dir, 'objectids_highres.png')
+            # remove file with final filename if it exists
+            # (necessary for Windows systems where renaming is not an atomic operation)
+            try:
+                os.remove(tgt)
+            except:
+                pass
 
-        # remove file with final filename if it exists
-        # (necessary for Windows systems where renaming is not an atomic operation)
-        try:
-            os.remove(tgt)
-        except:
-            pass
-
-        if LF.save_object_id_maps_for_all_views:
-            shutil.copy(src, tgt)
-        else:
-            os.rename(src, tgt)
+            if LF.save_object_id_maps_for_all_views:
+                shutil.copy(src, tgt)
+            else:
+                os.rename(src, tgt)
 
         # remove the oid output node
         bpy.context.scene.node_tree.nodes.remove(oid_out_node)
@@ -560,7 +565,10 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
             depth = depth.reshape((int(LF.y_res * LF.depth_map_scale), int(LF.x_res * LF.depth_map_scale)))
 
             # create depth map with original (low) resolution
-            depth_small = median_downsampling(depth, LF.depth_map_scale, LF.depth_map_scale)
+            if LF.depth_map_scale == 1.0:
+                depth_small = depth
+            else:
+                depth_small = median_downsampling(depth, LF.depth_map_scale, LF.depth_map_scale)
 
             # check if high resolution depth map has depth artifacts on individual pixels
             min_depth = np.min(depth_small)
@@ -582,26 +590,35 @@ class OBJECT_OT_render_lightfield(bpy.types.Operator):
                 # when depth < focus_dist, then disp > 0
                 # the above expression is the same as the original expression (below)
                 #disp = (factor / depth - LF.baseline_x_m * LF.focal_length * max_res) / LF.focus_dist / LF.sensor_size
-
-            disp_small = median_downsampling(disp, LF.depth_map_scale, LF.depth_map_scale)
+            
+            if LF.depth_map_scale == 1.0:
+                disp_small = disp 
+            else:
+                disp_small = median_downsampling(disp, LF.depth_map_scale, LF.depth_map_scale)
 
             # set disparity range for config file
             LF.min_disp = np.floor(np.amin(disp_small) * 10) / 10 - 0.1
             LF.max_disp = np.ceil(np.amax(disp_small) * 10) / 10 + 0.1
 
             # save disparity files
-            if camera.name == LF.get_center_camera().name:
-                write_pfm(depth, os.path.join(tgt_dir, 'gt_depth_highres.pfm'))
-                write_pfm(disp, os.path.join(tgt_dir, 'gt_disp_highres.pfm'))
+            if LF.save_all_maps_for_center_view and (camera.name == LF.get_center_camera().name):
                 write_pfm(depth_small, os.path.join(tgt_dir, 'gt_depth_lowres.pfm'))
                 write_pfm(disp_small, os.path.join(tgt_dir, 'gt_disp_lowres.pfm'))
-
+                if LF.depth_map_scale != 1.0:
+                    write_pfm(depth, os.path.join(tgt_dir, 'gt_depth_highres.pfm'))
+                    write_pfm(disp, os.path.join(tgt_dir, 'gt_disp_highres.pfm'))
+                
             if LF.save_depth_for_all_views:
                 camera_name = self.get_raw_camera_name(camera.name)
-                write_pfm(depth, os.path.join(tgt_dir, 'gt_depth_highres_%s.pfm' % camera_name))
-                write_pfm(disp, os.path.join(tgt_dir, 'gt_disp_highres_%s.pfm' % camera_name))
                 write_pfm(depth_small, os.path.join(tgt_dir, 'gt_depth_lowres_%s.pfm' % camera_name))
+                if LF.depth_map_scale != 1.0:
+                    write_pfm(depth, os.path.join(tgt_dir, 'gt_depth_highres_%s.pfm' % camera_name))
+            
+            if LF.save_disparity_for_all_views:
+                camera_name = self.get_raw_camera_name(camera.name)
                 write_pfm(disp_small, os.path.join(tgt_dir, 'gt_disp_lowres_%s.pfm' % camera_name))
+                if LF.depth_map_scale != 1.0:
+                    write_pfm(disp, os.path.join(tgt_dir, 'gt_disp_highres_%s.pfm' % camera_name))
 
     def fix_pixel_artefacts(self, disp, m_out_of_range, half_window=1):
         print("Fixing %d out of range pixel(s), values: %s" % (np.sum(m_out_of_range), list(disp[m_out_of_range])))
@@ -666,7 +683,12 @@ def median_downsampling(img, tile_height, tile_width):
     h, w = np.shape(img)
     if w % tile_width or h % tile_height:
         raise Exception("Image dimensions must be multiple of tile dimensions.")
-
+    #TOFIX: insr -- not sure if the above check is effective. w % tile_width (and h % tile_height)
+    # will always be 0.0 (and 0.0) because w = x_res * LF.depth_map_scale (and  h = y_res * LF.depth_map_scale)
+    # and tile_height and tile_width are mapped to LF.depth_map_scale.
+    # Indeed the greater problem is that when LF.depth_map_scale a non-integer value (for e.g. 0.5, or 1.5, etc), 
+    # then, the array split below will not result in an equal division (raising exception). 
+    # Therefore, it is probably better to set the type of LF.depth_map_scale to intProperty 
     n_tiles_horiz = w / tile_width
     n_tiles_vert = h / tile_height
     n_tiles = n_tiles_horiz * n_tiles_vert
